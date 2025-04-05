@@ -31,3 +31,8 @@ pub(crate) fn init() -> Result<(), IommuError> {
 pub(crate) fn has_dma_remapping() -> bool {
     false
 }
+
+/// RISC-V 不支持 IOMMU，因此返回 false
+pub(crate) fn has_interrupt_remapping() -> bool {
+    false
+}

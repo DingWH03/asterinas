@@ -158,11 +158,35 @@ impl DmaStream {
                 }
                 let start_va = crate::mm::paddr_to_vaddr(self.inner.segment.paddr()) as *const u8;
                 // TODO: Query the CPU for the cache line size via CPUID, we use 64 bytes as the cache line size here.
+                // for i in _byte_range.step_by(64) {
+                //     // TODO: Call the cache line flush command in the corresponding architecture.
+                //     todo!()
+                // }
+                // Ok(())
+                #[cfg(target_arch = "riscv64")]
+            {
                 for i in _byte_range.step_by(64) {
-                    // TODO: Call the cache line flush command in the corresponding architecture.
-                    todo!()
+                    let addr = unsafe { start_va.add(i) };
+                    // 此处调用 fence 指令来确保内存操作顺序，
+                    // 如果你的 RISC-V 平台提供专用的缓存刷新指令，请将下面这行替换掉
+                    unsafe {
+                        core::arch::asm!(
+                            "fence rw, rw",
+                            options(nostack, preserves_flags)
+                        );
+                    }
+                    // 可以考虑打印调试信息
+                    // debug!("Flushed cache line at address: {:p}", addr);
                 }
-                Ok(())
+            }
+            // 如果不是 riscv64 的其它平台，可以添加相应的实现
+            #[cfg(not(target_arch = "riscv64"))]
+            {
+                for _ in _byte_range.step_by(64) {
+                    // 占位，不做任何操作
+                }
+            }
+            Ok(())
             }
         }
     }

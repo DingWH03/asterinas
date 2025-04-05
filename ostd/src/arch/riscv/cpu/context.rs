@@ -2,7 +2,7 @@
 
 //! CPU execution context control.
 
-use core::fmt::Debug;
+use core::{arch::asm, fmt::Debug, sync::atomic::{AtomicBool, Ordering}};
 
 use riscv::register::scause::{Exception, Trap};
 
@@ -12,13 +12,153 @@ use crate::{
     user::{ReturnReason, UserContextApi, UserContextApiInternal},
 };
 
+// 定义FPU寄存器组（兼容F/D扩展）
+#[repr(C)]
+#[derive(Debug)]
+pub struct FpuState {
+    pub f: [usize; 32], // f0-f31（根据ABI可能需用u64类型）
+    pub fcsr: usize,    // 浮点控制状态寄存器
+    dirty: AtomicBool,       // 惰性保存标记
+}
+
+impl Clone for FpuState {
+    fn clone(&self) -> Self {
+        // 读取当前原子值并创建新实例
+        let current_dirty = self.dirty.load(Ordering::Relaxed);
+        
+        FpuState {
+            f: self.f.clone(),       // 数组默认支持 Clone
+            fcsr: self.fcsr,         // u32 是 Copy
+            dirty: AtomicBool::new(current_dirty), // 显式初始化新 AtomicBool
+        }
+    }
+}
+
+impl Default for FpuState {
+    fn default() -> Self {
+        Self {
+            f: [0; 32],
+            fcsr: 0,
+            dirty: AtomicBool::new(true),
+        }
+    }
+}
+
+impl FpuState {
+    pub fn save(&self) {
+        unsafe {
+            if self.dirty.load(Ordering::Relaxed) {
+                let ptr = self as *const Self as *mut Self;
+                asm!(
+                    // 保存所有浮点寄存器 f0-f31
+                    "
+                fsd f0, 0*8({0})
+                fsd f1, 1*8({0})
+                fsd f2, 2*8({0})
+                fsd f3, 3*8({0})
+                fsd f4, 4*8({0})
+                fsd f5, 5*8({0})
+                fsd f6, 6*8({0})
+                fsd f7, 7*8({0})
+                fsd f8, 8*8({0})
+                fsd f9, 9*8({0})
+                fsd f10, 10*8({0})
+                fsd f11, 11*8({0})
+                fsd f12, 12*8({0})
+                fsd f13, 13*8({0})
+                fsd f14, 14*8({0})
+                fsd f15, 15*8({0})
+                fsd f16, 16*8({0})
+                fsd f17, 17*8({0})
+                fsd f18, 18*8({0})
+                fsd f19, 19*8({0})
+                fsd f20, 20*8({0})
+                fsd f21, 21*8({0})
+                fsd f22, 22*8({0})
+                fsd f23, 23*8({0})
+                fsd f24, 24*8({0})
+                fsd f25, 25*8({0})
+                fsd f26, 26*8({0})
+                fsd f27, 27*8({0})
+                fsd f28, 28*8({0})
+                fsd f29, 29*8({0})
+                fsd f30, 30*8({0})
+                fsd f31, 31*8({0})
+                
+                // 保存 fcsr 控制寄存器
+                csrr t0, fcsr
+                sd t0, 32*8({0})
+                ",
+                    in(reg) (*ptr).f.as_mut_ptr(),
+                    out("t0") _,  // 声明 t0 被修改
+                    options(nostack, preserves_flags)
+                );
+                // 更新脏标记
+                self.dirty.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
+    pub fn restore(&self) {
+        unsafe {
+            let ptr = self as *const Self;
+            asm!(
+                // 恢复所有浮点寄存器 f0-f31
+                "
+            fld f0, 0*8({0})
+            fld f1, 1*8({0})
+            fld f2, 2*8({0})
+            fld f3, 3*8({0})
+            fld f4, 4*8({0})
+            fld f5, 5*8({0})
+            fld f6, 6*8({0})
+            fld f7, 7*8({0})
+            fld f8, 8*8({0})
+            fld f9, 9*8({0})
+            fld f10, 10*8({0})
+            fld f11, 11*8({0})
+            fld f12, 12*8({0})
+            fld f13, 13*8({0})
+            fld f14, 14*8({0})
+            fld f15, 15*8({0})
+            fld f16, 16*8({0})
+            fld f17, 17*8({0})
+            fld f18, 18*8({0})
+            fld f19, 19*8({0})
+            fld f20, 20*8({0})
+            fld f21, 21*8({0})
+            fld f22, 22*8({0})
+            fld f23, 23*8({0})
+            fld f24, 24*8({0})
+            fld f25, 25*8({0})
+            fld f26, 26*8({0})
+            fld f27, 27*8({0})
+            fld f28, 28*8({0})
+            fld f29, 29*8({0})
+            fld f30, 30*8({0})
+            fld f31, 31*8({0})
+            
+            // 恢复 fcsr 控制寄存器
+            ld t0, 32*8({0})
+            csrw fcsr, t0
+            ",
+                in(reg) ptr,
+                out("t0") _,
+                options(nostack, preserves_flags)
+            );
+            self.dirty.store(true, Ordering::Relaxed);
+        }
+        
+    }
+}
+
 /// Cpu context, including both general-purpose registers and FPU state.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 #[repr(C)]
 pub struct UserContext {
     user_context: RawUserContext,
     trap: Trap,
-    fpu_state: (), // TODO
+    fpu_state: FpuState, // TODO
     cpu_exception_info: CpuExceptionInfo,
 }
 
@@ -38,7 +178,7 @@ impl Default for UserContext {
         UserContext {
             user_context: RawUserContext::default(),
             trap: Trap::Exception(Exception::Unknown),
-            fpu_state: (),
+            fpu_state: FpuState::default(),
             cpu_exception_info: CpuExceptionInfo::default(),
         }
     }
@@ -78,12 +218,12 @@ impl UserContext {
     }
 
     /// Returns a reference to the FPU state.
-    pub fn fpu_state(&self) -> &() {
+    pub fn fpu_state(&self) -> &FpuState {
         &self.fpu_state
     }
 
     /// Returns a mutable reference to the FPU state.
-    pub fn fpu_state_mut(&mut self) -> &mut () {
+    pub fn fpu_state_mut(&mut self) -> &mut FpuState {
         &mut self.fpu_state
     }
 

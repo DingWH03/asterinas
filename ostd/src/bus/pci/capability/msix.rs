@@ -63,6 +63,9 @@ impl Clone for CapabilityMsixData {
 #[cfg(target_arch = "x86_64")]
 const MSIX_DEFAULT_MSG_ADDR: u32 = 0xFEE0_0000;
 
+#[cfg(target_arch = "riscv64")]
+const MSIX_DEFAULT_MSG_ADDR: u32 = 0x1000_0000;
+
 impl CapabilityMsixData {
     pub(super) fn new(dev: &mut PciCommonDevice, cap_ptr: u16) -> Self {
         // Get Table and PBA offset, provide functions to modify them
@@ -174,28 +177,39 @@ impl CapabilityMsixData {
 
         // If interrupt remapping is enabled, then we need to change the value of the message address.
         if has_interrupt_remapping() {
-            let mut handle = irq.inner_irq().bind_remapping_entry().unwrap().lock();
-
-            // Enable irt entry
-            let irt_entry_mut = handle.irt_entry_mut().unwrap();
-            irt_entry_mut.enable_default(irq.num() as u32);
-
-            // Use remappable format. The bits[4:3] should be always set to 1 according to the manual.
-            let mut address = MSIX_DEFAULT_MSG_ADDR | 0b1_1000;
-
-            // Interrupt index[14:0] is on address[19:5] and interrupt index[15] is on address[2].
-            address |= (handle.index() as u32 & 0x7FFF) << 5;
-            address |= (handle.index() as u32 & 0x8000) >> 13;
-
-            self.table_bar
-                .io_mem()
-                .write_once((16 * index) as usize + self.table_offset, &address)
-                .unwrap();
-            self.table_bar
-                .io_mem()
-                .write_once((16 * index + 8) as usize + self.table_offset, &0)
-                .unwrap();
+            // 使用条件编译，检查是否是 x86 架构
+            #[cfg(target_arch = "x86_64")]
+            {
+                let mut handle = irq.inner_irq().bind_remapping_entry().unwrap().lock();
+    
+                // Enable irt entry
+                let irt_entry_mut = handle.irt_entry_mut().unwrap();
+                irt_entry_mut.enable_default(irq.num() as u32);
+    
+                // Use remappable format. The bits[4:3] should be always set to 1 according to the manual.
+                let mut address = MSIX_DEFAULT_MSG_ADDR | 0b1_1000;
+    
+                // Interrupt index[14:0] is on address[19:5] and interrupt index[15] is on address[2].
+                address |= (handle.index() as u32 & 0x7FFF) << 5;
+                address |= (handle.index() as u32 & 0x8000) >> 13;
+    
+                self.table_bar
+                    .io_mem()
+                    .write_once((16 * index) as usize + self.table_offset, &address)
+                    .unwrap();
+                self.table_bar
+                    .io_mem()
+                    .write_once((16 * index + 8) as usize + self.table_offset, &0)
+                    .unwrap();
+            }
+    
+            // RISC-V 上没有重映射逻辑，因此直接跳过
+            #[cfg(target_arch = "riscv64")]
+            {
+                // 在 RISC-V 架构下，跳过中断重映射相关的操作
+            }
         } else {
+            // 非重映射模式下的写入操作
             self.table_bar
                 .io_mem()
                 .write_once(
@@ -204,7 +218,7 @@ impl CapabilityMsixData {
                 )
                 .unwrap();
         }
-
+    
         let _old_irq = core::mem::replace(&mut self.irqs[index as usize], Some(irq));
         // Enable this msix vector
         self.table_bar
@@ -212,6 +226,7 @@ impl CapabilityMsixData {
             .write_once((16 * index + 12) as usize + self.table_offset, &0_u32)
             .unwrap();
     }
+    
 
     /// Gets mutable IrqLine. User can register callbacks by using this function.
     pub fn irq_mut(&mut self, index: usize) -> Option<&mut IrqLine> {

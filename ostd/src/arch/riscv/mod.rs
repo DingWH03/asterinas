@@ -17,6 +17,21 @@ pub mod trap;
 
 use core::sync::atomic::Ordering;
 
+#[macro_export]
+macro_rules! if_tdx_enabled {
+    // Match when there is an else block
+    ($if_block:block else $else_block:block) => {{
+        // 直接返回 else_block（因为只在 RISC-V 上执行）
+        $else_block
+    }};
+    
+    // Match when there is no else block
+    ($if_block:block) => {{
+        // 直接不执行任何操作，返回空
+    }};
+}
+
+
 #[cfg(feature = "cvm_guest")]
 pub(crate) fn init_cvm_guest() {
     // Unimplemented, no-op
@@ -32,6 +47,27 @@ pub(crate) unsafe fn late_init_on_bsp() {
     crate::boot::smp::boot_all_aps();
 
     timer::init();
+}
+
+use core::time::Duration;
+use riscv::register::time;
+
+pub fn read_random() -> Option<u64> {
+    // 获取当前时间戳（以时钟滴答为单位）
+    let time_ticks = time::read();
+
+    // 这里使用一个简单的伪随机算法（线性同余生成器）
+    const A: u64 = 6364136223846793005;
+    const C: u64 = 1;
+    const M: u64 = 0xFFFFFFFFFFFFFFFF; // 最大的 u64 值 (2^64 - 1)
+
+    let mut seed = time_ticks as u64;
+    
+    // 简单的线性同余生成器公式
+    seed = (A.wrapping_mul(seed).wrapping_add(C)) % M;
+
+    // 返回生成的随机数
+    Some(seed)
 }
 
 pub(crate) unsafe fn init_on_ap() {

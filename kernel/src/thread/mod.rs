@@ -38,6 +38,7 @@ fn post_schedule_handler() {
 
 pub(super) fn init() {
     ostd::task::inject_post_schedule_handler(post_schedule_handler);
+    #[cfg(target_arch="x86_64")]
     ostd::arch::trap::inject_user_page_fault_handler(exception::page_fault_handler);
 }
 

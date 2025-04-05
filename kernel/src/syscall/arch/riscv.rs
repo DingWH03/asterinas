@@ -280,7 +280,7 @@ impl_syscall_nums_and_dispatch_fn! {
     SYS_MADVISE = 233            => sys_madvise(args[..3]);
     SYS_ACCEPT4 = 242            => sys_accept4(args[..4]);
     SYS_WAIT4 = 260              => sys_wait4(args[..4]);
-    SYS_PRLIMIT64 = 261          => sys_prlimit64(args[..4]);
+    // SYS_PRLIMIT64 = 261          => sys_prlimit64(args[..4]);
     SYS_SCHED_SETATTR = 274      => sys_sched_setattr(args[..3]);
     SYS_SCHED_GETATTR = 275      => sys_sched_getattr(args[..4]);
     SYS_GETRANDOM = 278          => sys_getrandom(args[..3]);

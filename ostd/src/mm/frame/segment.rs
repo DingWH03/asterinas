@@ -275,6 +275,13 @@ impl<M: AnyUFrameMeta> From<Segment<M>> for USegment {
     }
 }
 
+impl<M: AnyFrameMeta + ?Sized> Segment<M> {
+    /// 返回该内存段的起始物理地址。
+    pub fn paddr(&self) -> Paddr {
+        self.range.start
+    }
+}
+
 impl TryFrom<Segment<dyn AnyFrameMeta>> for USegment {
     type Error = Segment<dyn AnyFrameMeta>;
 
